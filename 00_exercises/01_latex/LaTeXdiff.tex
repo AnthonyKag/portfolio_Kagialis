@@ -1,0 +1,14 @@
+\RequirePackage{shellesc}
+
+\ShellEscape{latexdiff --flatten LaTeX_Clara.tex LaTeX_Peter.tex > main-d.tex}
+
+\input{main-d}
+
+\documentclass{dummy}
+\title{Demonstrating latexdiff}
+
+%we used --flatten as the initial stories were inserted from .txt files rather than being directly copied into the .tex document. --flatten allows to compare their content directly.
+
+%https://www.overleaf.com/
+% ChatGPT gave feedback on coding and recommedations to selected parts.
+%All coding suggestions were reviewed by the author.
