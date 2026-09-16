@@ -19,6 +19,7 @@ data.all <- cbind(data = data,
                   squared2 = data^2,
                   exponent = exp(data))
 
+#Create a LaTex formatted table using the first 9 rows
 table1 <- xtable(
   head(data.all, 9),
   caption = "The same data, but now in a table. Only the first nine rows are displayed.",
