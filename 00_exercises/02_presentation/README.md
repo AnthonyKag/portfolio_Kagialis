@@ -20,7 +20,7 @@ The main files in this project are:
 - `Freud_in_action.mp4`
 - `freud_logo.jpeg`
 
-The `.qmd` file contains the source code for the presentation, while the `.html` file is the rendered Reveal.js presentation.
+The `.qmd` file contains the source code for the presentation, while an `.html` file is the rendered Reveal.js presentation (and it can be generated using the files provided here).
 
 The `references.bib` file contains the bibliographic reference used in the presentation.
 
