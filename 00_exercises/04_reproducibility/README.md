@@ -1,5 +1,12 @@
-# Markup languages and reproducible programming in statistics
+# my-reproducible manuscript
 
-Deliverables for Markup languages and reproducible programming in statistics (202000010).
+<!-- badges: start -->
 
+<!-- badges: end -->
+
+The goal of my-reproducible-manuscript is to learn how to use Quarto
+
+Author: Antonios Kagialis
+
+Date: 17/11/2026
 
