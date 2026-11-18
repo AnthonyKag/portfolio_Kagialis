@@ -1,0 +1,213 @@
+---
+title: "Replication of the Boulesteix et al. Simulation Study"
+author: "Antonios Kagialis"
+format:
+  html: default
+csl: apa.csl
+bibliography: References.bib
+---
+```{r}
+#| label: setup
+#| include: false
+
+library(ggplot2)
+source("../scripts/simulate-measurement-error.R")
+```
+
+## Introduction
+### Introduction to the paper
+This script represents an enhanced reproducible framework for the coding parts of the study "Introduction to statistical simulations in health research" by @boulesteix2020. The original study measures how measurement error in HbA1c (hemoglobin A1c) and BMI (Body Mass Index) affects the estimated association between HbA1c and systolic blood pressure. Using the same participants, the authors added random error to HbA1c and BMI at six levels, ranging from 0% to 50% of the total variance per variable.There were 36 six different combinations of error levels (conditions) in total, and the authors refitted the reference regression 1000 times per condition. Finally, they compared the average HbA1c coefficient with the reference regression.
+
+### Improvements made
+The following code pipeline provides a more structured way to present the code of the study, with improvements made in various domains:
+
+1. Used descriptive names for data objects 
+2. Used code annotations
+3. Enhanced structure by putting the different blocks of the code into labelled Quarto chunks
+4. Created helper function scripts (we moved the measurement-error simulation into a helper function using a separate R script)
+4. Enhanced the import of the data through relative paths
+5. Reduced package dependencies (e.g. replacing mice::cc() with base R complete.cases()).
+6. Used targeted storage locations to export the simulation figures each time it renders.
+7. Used renv to facilitate analysis environment
+
+## Methods
+The analysis used data from the 2015–2016 NHANES survey [@nhanes2015].
+The analysis was conducted in R version 4.6.1 [@rstats].
+
+### Data Import 
+```{r}
+#| label: import-nhanes
+
+read_nhanes <- function(filename) {
+  # Go up one level from docs/ and find the file in data/.
+  path <- file.path("../data", filename)
+
+  # Read the SAS transport file and lowercase column names for the merge.
+  data <- haven::read_xpt(path, .name_repair = tolower)
+
+  # Return a standard R data frame.
+  as.data.frame(data)
+}
+
+# Import the five NHANES files.
+demographics   <- read_nhanes("DEMO_I.Xpt")  # Age and sex
+blood_pressure <- read_nhanes("BPX_I.Xpt")   # Blood pressure
+body_measures  <- read_nhanes("BMX_I.Xpt")   # Body measurements, including BMI
+glycohemoglobin <- read_nhanes("GHB_I.Xpt")  # HbA1c
+cholesterol    <- read_nhanes("TCHOL_I.Xpt") # Total cholesterol
+```
+
+### Analysis Sample
+```{r}
+#| label: prepare-analysis-sample
+
+# Select participant ID, sex, age, and the first systolic blood pressure
+# reading. Merge the two files by participant ID (seqn).
+d <- merge(
+  demographics[c("seqn", "riagendr", "ridageyr")],
+  blood_pressure[c("seqn", "bpxsy1")],
+  by = "seqn"
+)
+
+# Add BMI, HbA1c, and total cholesterol. Each merge keeps participants
+# whose IDs appear in both tables, matching the original script.
+d <- merge(d, body_measures[c("seqn", "bmxbmi")], by = "seqn")
+d <- merge(d, glycohemoglobin[c("seqn", "lbxgh")], by = "seqn")
+d <- merge(d, cholesterol[c("seqn", "lbdtcsi")], by = "seqn")
+
+# Create columns with shorter names for the regression models (cholesterol not used here)
+d$age <- d$ridageyr
+d$sex <- d$riagendr
+d$bp <- d$bpxsy1
+d$bmi <- d$bmxbmi
+d$HbA1C <- d$lbxgh
+
+# Mark participants younger than 18 for exclusion in the next step.
+d$age[d$age < 18] <- NA
+
+```
+
+### Complete-Case Analysis Sample
+
+```{r}
+#| label: select-complete-cases
+
+# Select the five variables used in the BMI-adjusted model.
+analysis_variables <- d[c("age", "sex", "bmi", "HbA1C", "bp")]
+
+# Keep rows with observed values for all five variables.
+dc <- analysis_variables[complete.cases(analysis_variables), ]
+```
+
+### Reference models
+```{r}
+#| label: reference-models
+
+model_without_bmi <- lm(bp ~ HbA1C + age + as.factor(sex), data = dc)
+model_with_bmi <- lm(bp ~ HbA1C + bmi + age + as.factor(sex), data = dc) #this is primarily used below
+ref <- coef(model_with_bmi)[["HbA1C"]] #HbA1c coefficient before adding measurement error
+```
+
+### Measurement-error simulation
+
+```{r}
+#| label: run-simulation
+
+# Test six levels of measurement error, from 0% to 50%.
+error_fractions <- seq(0, 0.5, by = 0.1)
+
+# Pair every HbA1c error level with every BMI error level.
+# Six levels for each variable give 6 × 6 = 36 scenarios.
+scenarios <- expand.grid(
+  exposure_error = error_fractions,    # HbA1c
+  confounder_error = error_fractions  # BMI
+)
+
+# Repeat the full set of scenarios 1,000 times on the complete-case sample.
+n_sim <- 1000L
+
+# Save the estimated HbA1c coefficient from each simulated regression.
+beta_hat <- simulate_measurement_error(dc, scenarios, n_sim)
+```
+
+## Results
+
+### Regression estimates before adding measurement error
+
+```{r}
+#| label: reference-model-results
+
+summary(model_without_bmi)
+confint(model_without_bmi)
+summary(model_with_bmi)
+confint(model_with_bmi)
+```
+
+### Mean HbA1c coefficients by scenario
+```{r}
+#| label: fig-measurement-error
+#| fig-cap: "Mean estimated HbA1c coefficient under combinations of measurement error in HbA1c and BMI."
+
+# Create one row per scenario. Convert error fractions to percentages
+# and average the HbA1c coefficients across the 1,000 repetitions.
+scenario_results <- data.frame(
+  me_exp = 100 * scenarios$exposure_error,
+  me_conf = 100 * scenarios$confounder_error,
+  estimate = colMeans(beta_hat)
+)
+
+# Plot HbA1c error on the x-axis and BMI error on the y-axis.
+FIGURE <- ggplot(scenario_results, aes(me_exp, me_conf)) +
+  geom_tile(aes(fill = estimate), color = "white") +
+  geom_text(aes(label = round(estimate, 2))) +
+  
+  # Orange indicates estimates below ref, and blue indicates estimates above it.
+  scale_fill_gradient2(
+    low = "#D55E00", mid = "white", high = "#56B4E9", midpoint = ref
+  ) +
+
+  # Label the axes and show a tick label for each simulated error level.
+  labs(
+    x = "% of total variance of HbA1c due to measurement error",
+    y = "% of total variance of BMI due to measurement error"
+  ) +
+  coord_equal() +
+  #we changed the code here so each variable gets its own tick(x-axis; HbA1c error, y-axis; BMI error). The original takes the HbA1c error levels for both axis which can be risky if the error levels change.
+  scale_y_continuous(breaks = unique(scenario_results$me_conf)) +
+  scale_x_continuous(breaks = unique(scenario_results$me_exp)) +
+
+  # Set the panel, axis, and legend appearance.
+  theme(
+    panel.background = element_rect(fill = "white", colour = "grey"),
+    plot.title = element_text(hjust = 0),
+    axis.ticks = element_blank(),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+FIGURE
+
+#We save in the results folder (each time the code regenerates the figure)
+dir.create("../results/figures", recursive = TRUE, showWarnings = FALSE)
+
+ggplot2::ggsave(
+  filename = "../results/figures/Figure_STRATOS.tif",
+  plot = FIGURE,
+  width = 8,
+  height = 7,
+  units = "in",
+  dpi = 300
+)
+```
+
+## Discussion
+We see that the heatmap was replicated reflecting HbA1c coefficient changes across different combinations of measurement error levels. The reference regression output also closely matched the output as reported in the original paper; When adjusting for age and gender the  estimated regression coefficient for HbA1c was 1.13mmHg, 95% CI[0.73,1.52]. In addition, when also adjusting for BMI, the estimated regression coefficient for HbA1c was 0.75mmHg, 95% CI [0.35, 1.16].
+
+From the heatmap we notice that in the absence of measurement error for both BMI and HbA1c, then the coefficient was 0.75 (similar to the reference regression). We also noticed partial offset of each other errors in some cases; When the measurement error accounted for 20% of the total variance in HbA1c and 50% of the total variance in BMI, the coefficient reached 0.74 which is close to the reference model.Confidence interval coverage was not evaluated in this implementation.
+
+## References
+
+::: {#refs}
+:::
